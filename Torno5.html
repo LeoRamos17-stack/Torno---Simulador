@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simulador de Torneado Cónico</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            margin: 0;
+            font-family: sans-serif;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            background-color: #f5f5f7;
+        }
+        #menu {
+            padding: 15px;
+            background: #ffffff;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            z-index: 10;
+            flex-shrink: 0;
+        }
+        .input-group {
+            margin-bottom: 8px;
+        }
+        label {
+            display: inline-block;
+            width: 180px;
+            font-size: 14px;
+            color: #333;
+        }
+        input {
+            width: 80px;
+            padding: 5px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        button {
+            padding: 8px 15px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            margin-top: 5px;
+        }
+        #canvas-container {
+            flex-grow: 1;
+            width: 100%;
+            height: 100%;
+            background: #e9ecef;
+        }
+        #resultado {
+            margin-top: 10px;
+            font-size: 15px;
+            font-weight: bold;
+            color: #28a745;
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+
+    <div id="menu">
+        <h3>Dimensiones de la Pieza Torneada</h3>
+        <div class="input-group">
+            <label>Largo Total de la Pieza:</label>
+            <input type="number" id="largoTotal" value="60">
+        </div>
+        <div class="input-group">
+            <label>Diámetro de la Pieza (D):</label>
+            <input type="number" id="diaMayor" value="38">
+        </div>
+        <div class="input-group">
+            <label>Diámetro Menor del Cono (d):</label>
+            <input type="number" id="diaMenor" value="30">
+        </div>
+        <div class="input-group">
+            <label>Distancia del Cono (L):</label>
+            <input type="number" id="longCono" value="30">
+        </div>
+        <div class="input-group">
+            <label>Diámetro del Barreno:</label>
+            <input type="number" id="diaBarreno" value="16">
+        </div>
+        <button onclick="actualizarPieza()">Calcular y Mostrar</button>
+        <div id="resultado">Ángulo del cono: —</div>
+    </div>
+
+    <div id="canvas-container"></div>
+
+    <script>
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xe9ecef);
+
+        const anchoInicial = window.innerWidth;
+        const altoInicial = window.innerHeight - 280; // Ajustado por el nuevo input
+
+        const camera = new THREE.PerspectiveCamera(40, anchoInicial / altoInicial, 0.1, 1000);
+        camera.position.set(70, 40, 100);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(anchoInicial, altoInicial);
+        container.appendChild(renderer.domElement);
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+
+        const luzPrincipal = new THREE.DirectionalLight(0xffffff, 1.0);
+        luzPrincipal.position.set(40, 60, 40);
+        scene.add(luzPrincipal);
+
+        const luzSecundaria = new THREE.DirectionalLight(0xffffff, 0.4);
+        luzSecundaria.position.set(-40, -20, -40);
+        scene.add(luzSecundaria);
+
+        const luzAmbiental = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(luzAmbiental);
+
+        let piezaMesh;
+
+        const materialMetal = new THREE.MeshPhongMaterial({ 
+            color: 0xcccccc, 
+            specular: 0xffffff,
+            shininess: 40,
+            flatShading: true, 
+            side: THREE.DoubleSide
+        });
+
+        function calcularAngulo(D, d, L) {
+            const radianes = Math.atan((D - d) / (2 * L));
+            return radianes * (180 / Math.PI);
+        }
+
+        function actualizarPieza() {
+            const largoTotal = parseFloat(document.getElementById('largoTotal').value);
+            const D = parseFloat(document.getElementById('diaMayor').value);
+            const d = parseFloat(document.getElementById('diaMenor').value);
+            const L = parseFloat(document.getElementById('longCono').value);
+            const dB = parseFloat(document.getElementById('diaBarreno').value);
+
+            if (isNaN(largoTotal) || isNaN(D) || isNaN(d) || isNaN(L) || isNaN(dB) || d >= D || L >= largoTotal || d <= 0 || L <= 0 || dB <= 0) {
+                alert("Revisa los datos de la pieza.");
+                return;
+            }
+
+            if (dB >= d) {
+                alert("El diámetro del barreno debe ser menor que el diámetro menor del cono.");
+                return;
+            }
+
+            const angulo = calcularAngulo(D, d, L);
+            document.getElementById('resultado').innerText = `Ángulo del cono: ${angulo.toFixed(2)}°`;
+
+            if (piezaMesh) {
+                scene.remove(piezaMesh);
+                piezaMesh.geometry.dispose();
+            }
+
+            const R_mayor = D / 2;
+            const r_menor = d / 2;
+            const r_barreno = dB / 2;
+            const largoCilindro = largoTotal - L;
+
+            // Perfil con barreno integrado (vaciado central continuo)
+            const puntos = [];
+            
+            // 1. Esquina interna trasera (inicio del barreno)
+            puntos.push(new THREE.Vector2(r_barreno, 0));
+            // 2. Esquina exterior trasera
+            puntos.push(new THREE.Vector2(R_mayor, 0));
+            // 3. Unión cilindro-cono
+            puntos.push(new THREE.Vector2(R_mayor, largoCilindro));
+            // 4. Esquina exterior delantera (diámetro menor)
+            puntos.push(new THREE.Vector2(r_menor, largoTotal));
+            // 5. Esquina interna delantera (fin del barreno)
+            puntos.push(new THREE.Vector2(r_barreno, largoTotal));
+
+            const geometry = new THREE.LatheGeometry(puntos, 64);
+            piezaMesh = new THREE.Mesh(geometry, materialMetal);
+            
+            piezaMesh.rotation.x = -Math.PI / 2;
+            piezaMesh.position.z = largoTotal / 2;
+            
+            scene.add(piezaMesh);
+        }
+
+        window.addEventListener('resize', () => {
+            const w = container.clientWidth || window.innerWidth;
+            const h = container.clientHeight || (window.innerHeight - 280);
+            camera.aspect = w / h;
+            camera.updateProjectionMatrix();
+            renderer.setSize(w, h);
+        });
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        setTimeout(() => {
+            actualizarPieza();
+            animate();
+            window.dispatchEvent(new Event('resize'));
+        }, 100);
+    </script>
+</body>
+</html>
